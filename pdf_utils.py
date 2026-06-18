@@ -1,10 +1,17 @@
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet
+import re
 
 
 def create_pdf(report_text, topic):
 
-    filename = f"{topic.replace(' ', '_')}.pdf"
+    safe_topic = re.sub(
+        r'[^a-zA-Z0-9_-]',
+        '_',
+        topic
+    )
+
+    filename = f"{safe_topic}.pdf"
 
     doc = SimpleDocTemplate(filename)
 
@@ -19,7 +26,9 @@ def create_pdf(report_text, topic):
         )
     )
 
-    content.append(Spacer(1, 12))
+    content.append(
+        Spacer(1, 12)
+    )
 
     content.append(
         Paragraph(

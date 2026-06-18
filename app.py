@@ -1,7 +1,10 @@
 import re
 from pdf_utils import create_pdf
+from vector_store import save_report as save_report_to_vectorstore
 from database import save_report, get_reports
 import streamlit as st
+from vector_store import get_retriever
+from agents import chat_chain
 import time
 from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain
 
@@ -384,6 +387,16 @@ with col_input:
     run_btn = st.button("⚡  Run Research Pipeline", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+    # ── Start the pipeline when the button is clicked ──
+    if run_btn:
+        if topic.strip():
+            st.session_state.running = True
+            st.session_state.done = False
+            st.session_state.results = {}
+            st.rerun()
+        else:
+            st.warning("Please enter a research topic first.")
+
     # Example chips
     st.markdown("""
     <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.5rem;">
@@ -433,7 +446,6 @@ with col_pipeline:
     step_card("04", "Critic Chain",  s("critic"), "Reviews & scores the report")
 
 
-# ── Run pipeline ──────────────────────────────────────────────────────────────
 # ── Run pipeline ──────────────────────────────────────────────────────────────
 if st.session_state.running and not st.session_state.done:
     results = {}
@@ -497,6 +509,9 @@ if st.session_state.running and not st.session_state.done:
             "research": research_combined
         })
 
+        # Index the report into the vector store so the chat feature can retrieve it
+        save_report_to_vectorstore(results["writer"])
+
         st.session_state.results = dict(results)
 
     # ── Step 4: Critic ──
@@ -518,6 +533,55 @@ if st.session_state.running and not st.session_state.done:
     st.session_state.done = True
 
     st.rerun()
+
+# ── Results display ─────────────────────────────────────────────
+
+r = st.session_state.results
+
+if r:
+
+    st.markdown("## 📊 Results")
+
+    # Final Report
+    if "writer" in r:
+
+        st.markdown("## 📝 Final Research Report")
+
+        st.markdown(r["writer"])
+
+        # Chat With Report
+        st.markdown("## 💬 Chat With Report")
+
+        question = st.text_input(
+            "Ask a question about this report",
+            key="chat_question"
+        )
+
+        if question:
+
+            retriever = get_retriever()
+
+            docs = retriever.invoke(question)
+
+            context = "\n\n".join(
+                [doc.page_content for doc in docs]
+            )
+
+            answer = chat_chain.invoke({
+                "context": context,
+                "question": question
+            })
+
+            st.markdown("### 🤖 Answer")
+
+            st.write(answer)
+
+    # Critic Feedback
+    if "critic" in r:
+
+        st.markdown("## 🧐 Critic Feedback")
+
+        st.markdown(r["critic"])
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""

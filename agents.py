@@ -4,6 +4,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from tools import web_search , scrape_url 
 import os
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -83,3 +85,25 @@ One line verdict:
 ])
 
 critic_chain = critic_prompt | llm | StrOutputParser()
+
+chat_prompt = ChatPromptTemplate.from_template(
+"""
+You are a helpful research assistant.
+
+Use ONLY the provided context.
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+"""
+)
+
+chat_chain = (
+    chat_prompt
+    | llm
+    | StrOutputParser()
+)
