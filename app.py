@@ -509,8 +509,11 @@ if st.session_state.running and not st.session_state.done:
             "research": research_combined
         })
 
-        # Index the report into the vector store so the chat feature can retrieve it
-        save_report_to_vectorstore(results["writer"])
+        # Remember the topic so the chat retriever can scope to this report
+        results["topic"] = topic_val
+
+        # Index the report into the vector store (tagged with its topic)
+        save_report_to_vectorstore(results["writer"], topic_val)
 
         st.session_state.results = dict(results)
 
@@ -549,6 +552,16 @@ if r:
 
         st.markdown(r["writer"])
 
+        # ── Download report as PDF ──
+        pdf_path = create_pdf(r["writer"], r.get("topic", "report"))
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "⬇  Download Report as PDF",
+                data=f,
+                file_name=pdf_path,
+                mime="application/pdf",
+            )
+
         # Chat With Report
         st.markdown("## 💬 Chat With Report")
 
@@ -559,7 +572,8 @@ if r:
 
         if question:
 
-            retriever = get_retriever()
+            # Scope retrieval to THIS report's chunks only
+            retriever = get_retriever(topic=r.get("topic"))
 
             docs = retriever.invoke(question)
 

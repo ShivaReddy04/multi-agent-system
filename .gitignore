@@ -2,3 +2,7 @@
 /.venv
 /node_modules
 /__pycache__
+
+# Generated runtime artifacts
+/chroma_db
+/research_history.db

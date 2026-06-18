@@ -1,9 +1,9 @@
-from agents import build_reader_agent , build_search_agent , writer_chain , critic_chain
+from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain
+from database import save_report
+from vector_store import save_report as save_report_to_vectorstore
 
-from agents import build_search_agent
 
-
-def run_reasearch_pipeline(topic: str) -> dict:
+def run_research_pipeline(topic: str) -> dict:
 
     state = {}
 
@@ -46,13 +46,11 @@ def run_reasearch_pipeline(topic: str) -> dict:
     print("step 3 - writer chain is drafting the report...")
     print("="*50 )
 
+    # NOTE: kept identical to app.py — no truncation, so report quality matches the UI.
     research_combined = (
     f"Search Results:\n{state['search_results']}\n\n"
     f"Details Scraped Content:\n{state['scraped_content']}"
     )
-
-    research_combined = research_combined[:1000] 
-
 
     writer_result = writer_chain.invoke({
         "topic": topic,
@@ -61,6 +59,9 @@ def run_reasearch_pipeline(topic: str) -> dict:
 
     state["report"] = writer_result
     print("\n Final Report: \n", state['report'])
+
+    # Index into the vector store (tagged with topic) — mirrors app.py
+    save_report_to_vectorstore(state["report"], topic)
 
 
     #critic report
@@ -73,11 +74,13 @@ def run_reasearch_pipeline(topic: str) -> dict:
         "report": state['report']
     })
     print("\n critic report \n", state['feedback'])
-          
-          
+
+    # Persist to SQLite history — mirrors app.py
+    save_report(topic, state["report"], state["feedback"])
+
     return state
 
 
 if __name__ == "__main__":
     topic = input("\n enter a research topic: ")
-    run_reasearch_pipeline(topic)
+    run_research_pipeline(topic)
