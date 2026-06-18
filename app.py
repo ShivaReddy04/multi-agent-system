@@ -293,7 +293,35 @@ details summary {
     margin-top: 3rem;
     letter-spacing: 0.08em;
 }
-            
+
+/* ── History list buttons ── */
+.st-key-history_list button {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1px solid rgba(255,255,255,0.08) !important;
+    color: #cdc8bf !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-weight: 400 !important;
+    font-size: 0.85rem !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    box-shadow: none !important;
+    border-radius: 8px !important;
+    padding: 0.55rem 0.9rem !important;
+    letter-spacing: 0 !important;
+    margin-bottom: 0.4rem !important;
+}
+.st-key-history_list button p {
+    text-align: left !important;
+    width: 100% !important;
+}
+.st-key-history_list button:hover {
+    border-color: rgba(255,140,50,0.4) !important;
+    background: rgba(255,140,50,0.06) !important;
+    color: #f0ebe0 !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -397,26 +425,45 @@ with col_input:
         else:
             st.warning("Please enter a research topic first.")
 
-    # Example chips
-    st.markdown("""
-    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.5rem;">
-        <span style="font-family:'DM Mono',monospace;font-size:0.68rem;color:#605850;letter-spacing:0.1em;">TRY →</span>
-    """, unsafe_allow_html=True)
-    examples = ["LLM agents 2025", "CRISPR gene editing", "Fusion energy progress"]
-    for ex in examples:
-        st.markdown(f"""
-        <span style="
-            background:rgba(255,255,255,0.04);
-            border:1px solid rgba(255,255,255,0.08);
-            border-radius:6px;
-            padding:0.25rem 0.7rem;
-            font-size:0.75rem;
-            color:#a09890;
-            font-family:'DM Sans',sans-serif;
-            cursor:default;
-        ">{ex}</span>
-        """, unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    # ── Previous searches (history) ──
+    st.markdown(
+        '<div style="font-family:\'DM Mono\',monospace;font-size:0.68rem;color:#ff8c32;'
+        'letter-spacing:0.2em;text-transform:uppercase;margin:0.5rem 0 0.8rem;">Previous Searches</div>',
+        unsafe_allow_html=True,
+    )
+
+    history = get_reports()
+
+    if not history:
+        st.markdown(
+            "<div style=\"font-family:'DM Mono',monospace;font-size:0.72rem;color:#605850;"
+            "letter-spacing:0.08em;margin-bottom:1.5rem;\">No searches yet — run one above.</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        with st.container(key="history_list"):
+            for report in history:
+                rep_id, rep_topic, rep_report, rep_feedback = (
+                    report[0],
+                    report[1],
+                    report[2],
+                    report[3],
+                )
+                label = rep_topic if rep_topic else "(untitled)"
+                if st.button(
+                    f"🔎  {label}",
+                    key=f"hist_{rep_id}",
+                    use_container_width=True,
+                ):
+                    # Load this saved report into the results / answer area
+                    st.session_state.results = {
+                        "topic": rep_topic,
+                        "writer": rep_report,
+                        "critic": rep_feedback,
+                    }
+                    st.session_state.running = False
+                    st.session_state.done = True
+                    st.rerun()
 
 with col_pipeline:
     st.markdown('<div class="section-heading">Pipeline</div>', unsafe_allow_html=True)
