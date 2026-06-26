@@ -267,6 +267,45 @@ Each stage also writes `st.session_state.results = dict(results)` so the right-h
 
 ---
 
+## 🚀 Running the project
+
+Quick commands to run the app or the headless pipeline locally.
+
+- **Create and activate a virtualenv (Windows PowerShell)**:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+- **Set required environment variables** (create a `.env` file in the project root):
+
+```
+TAVILY_API_KEY=your_tavily_key
+OPENROUTER_API_KEY=your_openrouter_key
+```
+
+- **Run the Streamlit UI (web app)**:
+
+```bash
+streamlit run app.py
+```
+
+- **Run the headless CLI pipeline** (useful for testing):
+
+```bash
+python pipeline.py
+```
+
+Notes:
+- The Streamlit UI (`app.py`) orchestrates the full pipeline and exposes the **Download PDF** and **Chat With Report** features.
+- The CLI pipeline (`pipeline.py`) runs the same four stages (Search → Reader → Writer → Critic) and persists the final report to SQLite and ChromaDB.
+- The pipeline uses a small quality gate: the writer + critic loop will retry up to `MAX_ATTEMPTS` (3) until the critic score reaches `MIN_SCORE` (7).
+
+
+---
+
 ## 🤖 Agent Architecture
 
 The system uses **two tool-using ReAct agents** (search, reader) and **three LCEL chains** (writer, critic, chat). Agents *decide and act* (tool calls); chains *transform* (deterministic prompt→LLM→string).

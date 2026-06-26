@@ -4,9 +4,60 @@ from vector_store import save_report as save_report_to_vectorstore
 from database import save_report, get_reports
 import streamlit as st
 from vector_store import get_retriever
-from agents import chat_chain
+from agents import chat_chain, ResearchReport, CriticReview, ChatResponse
 import time
-from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain
+from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain, parse_score
+
+
+# ── Helper functions to convert Pydantic models to display strings ──
+
+def report_to_string(report: ResearchReport) -> str:
+    """Convert ResearchReport Pydantic model to markdown string."""
+    if isinstance(report, ResearchReport):
+        md = f"""# Research Report
+
+## Introduction
+{report.introduction}
+
+## Key Findings
+"""
+        for i, finding in enumerate(report.key_findings, 1):
+            md += f"- {finding}\n"
+        
+        md += f"""
+## Conclusion
+{report.conclusion}
+
+## Sources
+"""
+        for source in report.sources:
+            md += f"- {source}\n"
+        return md
+    return str(report)  # Fallback for string input
+
+
+def critic_to_string(critic: CriticReview) -> str:
+    """Convert CriticReview Pydantic model to markdown string."""
+    if isinstance(critic, CriticReview):
+        md = f"""Score: {critic.score}/10
+
+**Strengths:**
+"""
+        for strength in critic.strengths:
+            md += f"- {strength}\n"
+        
+        md += "\n**Areas to Improve:**\n"
+        for area in critic.areas_to_improve:
+            md += f"- {area}\n"
+        
+        md += f"\n**Verdict:** {critic.verdict}"
+        return md
+    return str(critic)  # Fallback for string input
+
+# Quality gate: re-run the research until the critic scores the report at
+# least MIN_SCORE, but never more than MAX_ATTEMPTS times.
+MIN_SCORE = 7
+MAX_ATTEMPTS = 3
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -498,6 +549,9 @@ if st.session_state.running and not st.session_state.done:
     results = {}
     topic_val = st.session_state.topic_input
 
+    # ── Search + Reader run ONCE — the gathered research is reused on every
+    #    rewrite. Only the writer + critic loop below.
+
     # ── Step 1: Search ──
     with st.spinner("🔍 Search Agent is working…"):
 
@@ -541,43 +595,76 @@ if st.session_state.running and not st.session_state.done:
 
         results["reader"] = rr["messages"][-1].content
 
-        st.session_state.results = dict(results)
-
-    # ── Step 3: Writer ──
-    with st.spinner("✍️ Writer is drafting the report…"):
-
-        research_combined = (
-            f"SEARCH RESULTS:\n{results['search']}\n\n"
-            f"DETAILED SCRAPED CONTENT:\n{results['reader']}"
-        )
-
-        results["writer"] = writer_chain.invoke({
-            "topic": topic_val,
-            "research": research_combined
-        })
-
         # Remember the topic so the chat retriever can scope to this report
         results["topic"] = topic_val
 
-        # Index the report into the vector store (tagged with its topic)
-        save_report_to_vectorstore(results["writer"], topic_val)
-
         st.session_state.results = dict(results)
 
-    # ── Step 4: Critic ──
-    with st.spinner("🧐 Critic is reviewing the report…"):
+    research_combined = (
+        f"SEARCH RESULTS:\n{results['search']}\n\n"
+        f"DETAILED SCRAPED CONTENT:\n{results['reader']}"
+    )
 
-        results["critic"] = critic_chain.invoke({
-            "report": results["writer"]
-        })
+    # ── Write + critique loop: rewrite (using the SAME research) until the
+    #    critic scores >= MIN_SCORE, capped at MAX_ATTEMPTS.
+    previous_feedback = None   # critic feedback from the last attempt (if any)
 
-        save_report(
-    topic_val,
-    results["writer"],
-    results["critic"]
-)
+    for attempt in range(1, MAX_ATTEMPTS + 1):
 
-        st.session_state.results = dict(results)
+        attempt_label = f" (attempt {attempt}/{MAX_ATTEMPTS})" if attempt > 1 else ""
+
+        # ── Step 3: Writer ──
+        with st.spinner(f"✍️ Writer is drafting the report…{attempt_label}"):
+
+            # On a retry, give the writer the previous critique so it can
+            # fix the weak spots instead of repeating them. The underlying
+            # research stays the same — only the writing is redone.
+            writer_input = research_combined
+            if previous_feedback:
+                writer_input += (
+                    "\n\nPREVIOUS REPORT FEEDBACK (the last draft scored too low — "
+                    "fix every issue below to improve the report):\n"
+                    f"{previous_feedback}"
+                )
+
+            results["writer"] = writer_chain.invoke({
+                "topic": topic_val,
+                "research": writer_input
+            })
+
+            st.session_state.results = dict(results)
+
+        # ── Step 4: Critic ──
+        with st.spinner(f"🧐 Critic is reviewing the report…{attempt_label}"):
+
+            results["critic"] = critic_chain.invoke({
+                "report": report_to_string(results["writer"])
+            })
+
+            results["score"] = parse_score(results["critic"])
+            results["attempts"] = attempt
+
+            st.session_state.results = dict(results)
+
+        # Accept if the report hit the target, or if no score could be read
+        # (better to stop than loop blindly).
+        if results["score"] is None or results["score"] >= MIN_SCORE:
+            break
+
+        # Otherwise rewrite the report, carrying this critique forward.
+        previous_feedback = results["critic"]
+
+    # ── Save only the final accepted/best report — once, after the loop ──
+    # Convert Pydantic models to strings for storage
+    writer_str = report_to_string(results["writer"])
+    critic_str = critic_to_string(results["critic"])
+    
+    save_report_to_vectorstore(writer_str, topic_val)
+    save_report(
+        topic_val,
+        writer_str,
+        critic_str
+    )
 
     st.session_state.running = False
     st.session_state.done = True
@@ -597,10 +684,11 @@ if r:
 
         st.markdown("## 📝 Final Research Report")
 
-        st.markdown(r["writer"])
+        writer_display = report_to_string(r["writer"]) if isinstance(r["writer"], ResearchReport) else r["writer"]
+        st.markdown(writer_display)
 
         # ── Download report as PDF ──
-        pdf_path = create_pdf(r["writer"], r.get("topic", "report"))
+        pdf_path = create_pdf(writer_display, r.get("topic", "report"))
         with open(pdf_path, "rb") as f:
             st.download_button(
                 "⬇  Download Report as PDF",
@@ -635,14 +723,32 @@ if r:
 
             st.markdown("### 🤖 Answer")
 
-            st.write(answer)
+            # Extract answer from ChatResponse if it's a Pydantic model
+            answer_text = answer.answer if isinstance(answer, ChatResponse) else str(answer)
+            st.write(answer_text)
 
     # Critic Feedback
     if "critic" in r:
 
         st.markdown("## 🧐 Critic Feedback")
 
-        st.markdown(r["critic"])
+        # Show the quality-gate outcome: final score + how many attempts it took.
+        score = r.get("score")
+        attempts = r.get("attempts")
+        if score is not None:
+            if score >= MIN_SCORE:
+                st.success(
+                    f"✓ Passed quality gate — score {score:g}/10 "
+                    f"(reached in {attempts} attempt{'s' if attempts and attempts > 1 else ''})."
+                )
+            else:
+                st.warning(
+                    f"⚠ Best score {score:g}/10 after {attempts} attempts "
+                    f"(target was {MIN_SCORE}/10)."
+                )
+
+        critic_display = critic_to_string(r["critic"]) if isinstance(r["critic"], CriticReview) else r["critic"]
+        st.markdown(critic_display)
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
