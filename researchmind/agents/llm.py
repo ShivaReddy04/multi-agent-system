@@ -12,16 +12,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Pin a concrete free model instead of the generic "openrouter/free" router,
-# which hops between whatever free model is available and is frequently
-# overloaded (the source of the 504s). Override via OPENROUTER_MODEL without a
-# code change if this one gets rate-limited or retired.
-MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+# Use Groq's free tier — hosted (works on Render) with far more generous rate
+# limits than OpenRouter's free tier. Groq exposes an OpenAI-compatible API, so
+# ChatOpenAI works by just pointing base_url at it — no extra dependency.
+# Override the model via GROQ_MODEL without a code change if needed.
+MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 llm = ChatOpenAI(
     model=MODEL,
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+    api_key=os.getenv("GROQ_API_KEY"),
     temperature=0,
     # Give the writer enough room to finish its JSON report. Without this the
     # free model stops early and the report JSON gets cut off mid-string,
