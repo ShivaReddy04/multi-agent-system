@@ -12,8 +12,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Pin a concrete free model instead of the generic "openrouter/free" router,
+# which hops between whatever free model is available and is frequently
+# overloaded (the source of the 504s). Override via OPENROUTER_MODEL without a
+# code change if this one gets rate-limited or retired.
+MODEL = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+
 llm = ChatOpenAI(
-    model="openrouter/free",
+    model=MODEL,
     base_url="https://openrouter.ai/api/v1",
     api_key=os.getenv("OPENROUTER_API_KEY"),
     temperature=0,
