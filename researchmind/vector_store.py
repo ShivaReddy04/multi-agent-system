@@ -1,5 +1,5 @@
 from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 import os
@@ -15,10 +15,14 @@ _embedding_model = None
 
 
 def get_embedding_model():
-    """Return a cached HuggingFaceEmbeddings instance, creating it on first use."""
+    """Return a cached FastEmbedEmbeddings instance, creating it on first use.
+
+    FastEmbed runs the same all-MiniLM-L6-v2 model via ONNX Runtime instead of
+    PyTorch, which keeps memory low enough to deploy on small (~1 GB) tiers.
+    """
     global _embedding_model
     if _embedding_model is None:
-        _embedding_model = HuggingFaceEmbeddings(
+        _embedding_model = FastEmbedEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
     return _embedding_model
