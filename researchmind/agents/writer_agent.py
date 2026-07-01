@@ -8,7 +8,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from .custom_parser import RobustPydanticParser
-from .llm import llm
+from .llm import llm, with_resilience
 
 
 class ResearchReport(BaseModel):
@@ -33,4 +33,4 @@ Return ONLY this JSON structure (no markdown, no code blocks):
     ]
 )
 
-writer_chain = writer_prompt | llm | parser
+writer_chain = with_resilience(writer_prompt | llm | parser)

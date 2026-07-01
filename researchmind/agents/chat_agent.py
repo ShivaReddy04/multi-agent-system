@@ -7,7 +7,7 @@ An LCEL chain that answers questions using ONLY the provided context
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from .custom_parser import RobustPydanticParser
-from .llm import llm
+from .llm import llm, with_resilience
 
 
 class ChatResponse(BaseModel):
@@ -28,4 +28,4 @@ Question:
 Return only: {{"answer": "your answer"}}"""
 )
 
-chat_chain = chat_prompt | llm | parser
+chat_chain = with_resilience(chat_prompt | llm | parser)

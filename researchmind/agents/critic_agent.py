@@ -9,7 +9,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from .custom_parser import RobustPydanticParser
-from .llm import llm
+from .llm import llm, with_resilience
 
 
 class CriticReview(BaseModel):
@@ -48,4 +48,4 @@ Return ONLY this JSON (no markdown, no code blocks):
     ]
 )
 
-critic_chain = critic_prompt | llm | parser
+critic_chain = with_resilience(critic_prompt | llm | parser)
