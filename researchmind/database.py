@@ -1,7 +1,13 @@
+import os
 import sqlite3
 
+DB_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
+DB_PATH = os.path.abspath(os.path.join(DB_DIR, "research_history.db"))
+
+os.makedirs(DB_DIR, exist_ok=True)
+
 conn = sqlite3.connect(
-    "research_history.db",
+    DB_PATH,
     check_same_thread=False
 )
 

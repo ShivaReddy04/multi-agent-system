@@ -1,7 +1,7 @@
-from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain, parse_score
-from agents import ResearchReport, CriticReview
-from database import save_report
-from vector_store import save_report as save_report_to_vectorstore
+from researchmind.agents import build_reader_agent, build_search_agent, writer_chain, critic_chain, parse_score
+from researchmind.agents import ResearchReport, CriticReview
+from researchmind.database import save_report
+from researchmind.vector_store import save_report as save_report_to_vectorstore
 
 
 # ── Helper functions to convert Pydantic models to display strings ──

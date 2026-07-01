@@ -1,12 +1,19 @@
+import os
+import sys
+
+# Ensure the project root (the folder containing the `researchmind` package)
+# is on sys.path so absolute `researchmind.*` imports resolve regardless of
+# the working directory the app is launched from.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import re
-from pdf_utils import create_pdf
-from vector_store import save_report as save_report_to_vectorstore
-from database import save_report, get_reports
+from researchmind.pdf_utils import create_pdf
+from researchmind.database import save_report, get_reports
 import streamlit as st
-from vector_store import get_retriever
-from agents import chat_chain, ResearchReport, CriticReview, ChatResponse
+from researchmind.vector_store import get_retriever
+from researchmind.agents import chat_chain, ResearchReport, CriticReview, ChatResponse
 import time
-from agents import build_reader_agent, build_search_agent, writer_chain, critic_chain, parse_score
+from researchmind.agents import build_reader_agent, build_search_agent, writer_chain, critic_chain, parse_score
 
 
 # ── Helper functions to convert Pydantic models to display strings ──
@@ -399,27 +406,36 @@ def step_card(num: str, title: str, state: str, desc: str = ""):
 
 
 # ── Session state init ────────────────────────────────────────────────────────
-for key in ("results", "running", "done"):
+for key in ("results", "running", "done", "nav_page"):
     if key not in st.session_state:
-        st.session_state[key] = {} if key == "results" else False
+        if key == "results":
+            st.session_state[key] = {}
+        elif key == "nav_page":
+            st.session_state[key] = "Research"
+        else:
+            st.session_state[key] = False
 
 page = st.sidebar.radio(
     "Navigation",
     [
         "Research",
         "History"
-    ]
+    ],
+    index=0 if st.session_state.nav_page == "Research" else 1,
+    key="nav_page"
 )
 
 if page == "History":
 
     st.title("📚 Research History")
 
-    reports = get_reports()
+    reports = get_reports()[:4]
 
     if not reports:
         st.info("No reports found.")
         st.stop()
+
+    st.markdown("_Showing the latest 4 history entries._")
 
     for report in reports:
 
@@ -483,7 +499,7 @@ with col_input:
         unsafe_allow_html=True,
     )
 
-    history = get_reports()
+    history = get_reports()[:4]
 
     if not history:
         st.markdown(
@@ -516,32 +532,51 @@ with col_input:
                     st.session_state.done = True
                     st.rerun()
 
+# The 4 pipeline stages, in execution order: (number, state-key, title, description)
+PIPELINE_STEPS = [
+    ("01", "search", "Search Agent", "Gathers recent web information"),
+    ("02", "reader", "Reader Agent", "Scrapes & extracts deep content"),
+    ("03", "writer", "Writer Chain", "Drafts the full research report"),
+    ("04", "critic", "Critic Chain", "Reviews & scores the report"),
+]
+
+
+def render_pipeline(placeholder, states):
+    """(Re)draw all four step cards inside `placeholder` for the given states.
+
+    `states` maps each step-key to "waiting" | "running" | "done". Calling this
+    repeatedly during the blocking pipeline run lets the cards update live —
+    highlighting the active agent, then marking it done before the next starts.
+    """
+    with placeholder.container():
+        for num, key, title, desc in PIPELINE_STEPS:
+            step_card(num, title, states.get(key, "waiting"), desc)
+
+
+def static_pipeline_states():
+    """Derive card states from session state for a normal (non-live) render."""
+    r = st.session_state.results
+    steps = [key for _, key, _, _ in PIPELINE_STEPS]
+    if not r:
+        return {k: "waiting" for k in steps}
+    states, running_marked = {}, False
+    for k in steps:
+        if k in r:
+            states[k] = "done"
+        elif st.session_state.running and not running_marked:
+            states[k] = "running"   # first not-yet-done step is the active one
+            running_marked = True
+        else:
+            states[k] = "waiting"
+    return states
+
+
 with col_pipeline:
     st.markdown('<div class="section-heading">Pipeline</div>', unsafe_allow_html=True)
 
-    r = st.session_state.results
-    done = st.session_state.done
-
-    def s(step):
-        if not r:
-            return "waiting"
-        steps = ["search", "reader", "writer", "critic"]
-        idx = steps.index(step)
-        completed = list(r.keys())
-        # figure out which steps are done
-        if step in r:
-            return "done"
-        # which step is running now (first not in r)
-        if st.session_state.running:
-            for i, k in enumerate(steps):
-                if k not in r:
-                    return "running" if k == step else "waiting"
-        return "waiting"
-
-    step_card("01", "Search Agent",  s("search"), "Gathers recent web information")
-    step_card("02", "Reader Agent",  s("reader"), "Scrapes & extracts deep content")
-    step_card("03", "Writer Chain",  s("writer"), "Drafts the full research report")
-    step_card("04", "Critic Chain",  s("critic"), "Reviews & scores the report")
+    # A single placeholder we can re-render in place as agents progress.
+    pipeline_ph = st.empty()
+    render_pipeline(pipeline_ph, static_pipeline_states())
 
 
 # ── Run pipeline ──────────────────────────────────────────────────────────────
@@ -549,10 +584,17 @@ if st.session_state.running and not st.session_state.done:
     results = {}
     topic_val = st.session_state.topic_input
 
+    # Live state for the pipeline cards. Updated step-by-step so the user sees
+    # each agent highlight while it works, then turn green ("done") before the
+    # next one lights up.
+    live_states = {key: "waiting" for _, key, _, _ in PIPELINE_STEPS}
+
     # ── Search + Reader run ONCE — the gathered research is reused on every
     #    rewrite. Only the writer + critic loop below.
 
     # ── Step 1: Search ──
+    live_states["search"] = "running"
+    render_pipeline(pipeline_ph, live_states)
     with st.spinner("🔍 Search Agent is working…"):
 
         search_agent = build_search_agent()
@@ -577,6 +619,11 @@ if st.session_state.running and not st.session_state.done:
 
         st.session_state.results = dict(results)
 
+    # Search finished → mark done, then light up the Reader.
+    live_states["search"] = "done"
+    live_states["reader"] = "running"
+    render_pipeline(pipeline_ph, live_states)
+
     # ── Step 2: Reader ──
     with st.spinner("📄 Reader Agent is scraping top resources…"):
 
@@ -600,6 +647,11 @@ if st.session_state.running and not st.session_state.done:
 
         st.session_state.results = dict(results)
 
+    # Reader finished → mark done, then light up the Writer.
+    live_states["reader"] = "done"
+    live_states["writer"] = "running"
+    render_pipeline(pipeline_ph, live_states)
+
     research_combined = (
         f"SEARCH RESULTS:\n{results['search']}\n\n"
         f"DETAILED SCRAPED CONTENT:\n{results['reader']}"
@@ -612,6 +664,11 @@ if st.session_state.running and not st.session_state.done:
     for attempt in range(1, MAX_ATTEMPTS + 1):
 
         attempt_label = f" (attempt {attempt}/{MAX_ATTEMPTS})" if attempt > 1 else ""
+
+        # On a retry the writer runs again — re-light it (and reset the critic).
+        live_states["writer"] = "running"
+        live_states["critic"] = "waiting"
+        render_pipeline(pipeline_ph, live_states)
 
         # ── Step 3: Writer ──
         with st.spinner(f"✍️ Writer is drafting the report…{attempt_label}"):
@@ -634,6 +691,11 @@ if st.session_state.running and not st.session_state.done:
 
             st.session_state.results = dict(results)
 
+        # Writer finished → mark done, then light up the Critic.
+        live_states["writer"] = "done"
+        live_states["critic"] = "running"
+        render_pipeline(pipeline_ph, live_states)
+
         # ── Step 4: Critic ──
         with st.spinner(f"🧐 Critic is reviewing the report…{attempt_label}"):
 
@@ -645,6 +707,10 @@ if st.session_state.running and not st.session_state.done:
             results["attempts"] = attempt
 
             st.session_state.results = dict(results)
+
+        # Critic finished this attempt → mark done.
+        live_states["critic"] = "done"
+        render_pipeline(pipeline_ph, live_states)
 
         # Accept if the report hit the target, or if no score could be read
         # (better to stop than loop blindly).
@@ -658,7 +724,8 @@ if st.session_state.running and not st.session_state.done:
     # Convert Pydantic models to strings for storage
     writer_str = report_to_string(results["writer"])
     critic_str = critic_to_string(results["critic"])
-    
+
+    from researchmind.vector_store import save_report as save_report_to_vectorstore
     save_report_to_vectorstore(writer_str, topic_val)
     save_report(
         topic_val,
@@ -708,6 +775,7 @@ if r:
         if question:
 
             # Scope retrieval to THIS report's chunks only
+            from researchmind.vector_store import get_retriever
             retriever = get_retriever(topic=r.get("topic"))
 
             docs = retriever.invoke(question)

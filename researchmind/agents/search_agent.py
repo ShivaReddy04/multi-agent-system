@@ -5,7 +5,7 @@ Tavily and returns recent web information as text.
 """
 
 from langchain.agents import create_agent
-from tools import web_search
+from ..tools import web_search
 from .llm import llm
 
 

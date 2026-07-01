@@ -5,7 +5,7 @@ URL from the search output and scrapes deeper content.
 """
 
 from langchain.agents import create_agent
-from tools import scrape_url
+from ..tools import scrape_url
 from .llm import llm
 
 
