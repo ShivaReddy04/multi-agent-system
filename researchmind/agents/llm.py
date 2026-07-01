@@ -12,16 +12,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Use Groq's free tier — hosted (works on Render) with far more generous rate
-# limits than OpenRouter's free tier. Groq exposes an OpenAI-compatible API, so
-# ChatOpenAI works by just pointing base_url at it — no extra dependency.
-# Override the model via GROQ_MODEL without a code change if needed.
-MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+# Use GitHub Models — gives OpenAI models (gpt-4o-mini) via an OpenAI-compatible
+# endpoint, authenticated with a GitHub token. Hosted, so it works on Render,
+# and ChatOpenAI works by just pointing base_url at it — no extra dependency.
+# Override the model via GITHUB_MODEL without a code change if needed.
+MODEL = os.getenv("GITHUB_MODEL", "openai/gpt-4o-mini")
 
 llm = ChatOpenAI(
     model=MODEL,
-    base_url="https://api.groq.com/openai/v1",
-    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://models.github.ai/inference",
+    api_key=os.getenv("GITHUB_TOKEN"),
     temperature=0,
     # Give the writer enough room to finish its JSON report. Without this the
     # free model stops early and the report JSON gets cut off mid-string,
