@@ -81,16 +81,116 @@ class RobustPydanticParser(BaseOutputParser[T]):
             except json.JSONDecodeError:
                 pass
 
-        # Try 3: Look for JSON array
-        start_idx = text.find("[")
+        first_brace = text.find("{")
+        first_bracket = text.find("[")
+        # Whether the top-level value is an object (starts with '{') rather than
+        # a bare array. An inner array inside an object must NOT be mistaken for
+        # the whole result — that would return a list and break `Model(**list)`.
+        top_level_is_object = first_brace != -1 and (
+            first_bracket == -1 or first_brace < first_bracket
+        )
+
+        # Try 3: The response was cut off mid-generation (common with the free
+        # model hitting its output limit). Best-effort repair: close any open
+        # string / brackets so the salvageable part of the object still parses.
+        # Run this before bare-array extraction so a truncated object isn't
+        # misread as the inner array it happens to contain.
+        if top_level_is_object:
+            repaired = self._repair_truncated_json(text)
+            if repaired is not None:
+                return repaired
+
+        # Try 4: The whole output is a bare JSON array.
         end_idx = text.rfind("]")
-        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            json_str = text[start_idx : end_idx + 1]
+        if first_bracket != -1 and end_idx != -1 and end_idx > first_bracket:
+            json_str = text[first_bracket : end_idx + 1]
             try:
                 return json.loads(json_str)
             except json.JSONDecodeError:
                 pass
 
+        return None
+
+    def _repair_truncated_json(self, text: str) -> dict | None:
+        """Recover a JSON object that stopped mid-generation.
+
+        Takes the text from the first ``{`` and closes whatever is still open
+        (an unterminated string, then any open ``[``/``{``). If that doesn't
+        parse, it trims back to the last structurally complete point (end of a
+        string/bracket, or before a trailing comma) and retries.
+        """
+        start = text.find("{")
+        if start == -1:
+            return None
+        s = text[start:]
+
+        # Single pass: find what's open at the end, and record "safe" cut
+        # points where the JSON could be closed cleanly.
+        stack: list[str] = []
+        in_string = False
+        escape = False
+        cut_points: list[int] = []
+        for i, ch in enumerate(s):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                if not in_string:
+                    cut_points.append(i + 1)  # just closed a string value
+                continue
+            if in_string:
+                continue
+            if ch in "{[":
+                stack.append("}" if ch == "{" else "]")
+            elif ch in "}]":
+                if stack:
+                    stack.pop()
+                cut_points.append(i + 1)
+            elif ch == ",":
+                cut_points.append(i)  # drop the comma and the incomplete tail
+
+        candidates: list[str] = []
+
+        # Strategy 1: close the currently-open string and brackets in place.
+        repaired = s + ('"' if in_string else "")
+        repaired += "".join(reversed(stack))
+        candidates.append(repaired)
+
+        # Strategy 2: trim back to a safe cut point (latest first) and re-close.
+        for cut in list(reversed(cut_points))[:10]:
+            prefix = s[:cut].rstrip().rstrip(",")
+            depth: list[str] = []
+            ins = esc = False
+            for ch in prefix:
+                if esc:
+                    esc = False
+                    continue
+                if ch == "\\":
+                    esc = True
+                    continue
+                if ch == '"':
+                    ins = not ins
+                    continue
+                if ins:
+                    continue
+                if ch in "{[":
+                    depth.append("}" if ch == "{" else "]")
+                elif ch in "}]":
+                    if depth:
+                        depth.pop()
+            candidates.append(prefix + "".join(reversed(depth)))
+
+        for cand in candidates:
+            try:
+                obj = json.loads(cand)
+                if isinstance(obj, dict):
+                    return obj
+            except json.JSONDecodeError:
+                continue
         return None
 
     def _fix_common_issues(self, obj: dict) -> dict:
