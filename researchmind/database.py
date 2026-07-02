@@ -61,3 +61,18 @@ def get_reports():
     """)
 
     return cursor.fetchall()
+
+
+def get_report(report_id):
+    """Return a single report row by its id, or None if not found."""
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM reports
+        WHERE id = ?
+        """,
+        (report_id,)
+    )
+
+    return cursor.fetchone()

@@ -85,3 +85,5 @@ zstandard==0.25.0
 reportlab>=4.0
 langchain-chroma
 fastembed
+fastapi
+uvicorn[standard]

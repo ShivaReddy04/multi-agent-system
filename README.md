@@ -16,6 +16,11 @@ An AI-powered research assistant that leverages multiple specialized agents to a
 - 🔄 Modular Agent Workflow
 - ⚡ FastAPI Backend Support
 - 📚 Source Attribution & Citations
+- 📄 PDF Report Export
+- 🕘 Research History
+- 🗂️ Vector Database Integration (Chroma)
+- 🔎 RAG-based Knowledge Retrieval (chat with reports)
+- 🔀 Multi-model LLM Support (GitHub Models + Groq fallback)
 
 ---
 
@@ -51,14 +56,16 @@ An AI-powered research assistant that leverages multiple specialized agents to a
 - FastAPI
 
 ### AI & LLM
-- LangChain
-- OpenAI GPT
+- LangChain / LangGraph
+- GitHub Models (OpenAI gpt-4o-mini) — primary
+- Groq (Llama 3.3 70B) — automatic fallback
 - Pydantic
 - JSON Output Parser
 
 ### Search & Retrieval
 - Tavily Search API
 - Web Scraping
+- Chroma vector store (RAG chat over reports)
 
 ### Frontend
 - Streamlit
@@ -73,26 +80,30 @@ An AI-powered research assistant that leverages multiple specialized agents to a
 ## 📂 Project Structure
 
 ```
-multi-agent-research-system/
+multi-agent-system/
 │
-├── agents/
-│   ├── search_agent.py
-│   ├── reader_agent.py
-│   └── coordinator.py
+├── researchmind/
+│   ├── agents/
+│   │   ├── llm.py            # shared LLM config (GitHub Models + Groq fallback)
+│   │   ├── search_agent.py   # web search agent (Tavily)
+│   │   ├── reader_agent.py   # scrapes & extracts page content
+│   │   ├── writer_agent.py   # drafts the structured report
+│   │   ├── critic_agent.py   # reviews & scores the report
+│   │   ├── chat_agent.py     # Q&A over a report
+│   │   └── custom_parser.py
+│   │
+│   ├── app.py               # Streamlit UI
+│   ├── api.py               # FastAPI backend
+│   ├── pipeline.py          # shared research pipeline (used by UI + API)
+│   ├── database.py          # SQLite research history
+│   ├── vector_store.py      # Chroma vector store for RAG chat
+│   ├── pdf_utils.py         # PDF report export
+│   └── tools.py             # Tavily search tool
 │
-├── chains/
-│
-├── prompts/
-│
-├── models/
-│
-├── tools/
-│
-├── utils/
-│
-├── app.py
-├── streamlit_app.py
+├── data/                    # SQLite DB + Chroma store (gitignored)
+├── outputs/                 # generated PDF reports
 ├── requirements.txt
+├── .env
 └── README.md
 ```
 
@@ -141,12 +152,8 @@ multi-agent-research-system/
 
 - Memory-enabled agents
 - Multi-agent collaboration
-- PDF report export
-- Research history
-- Vector database integration
-- RAG-based knowledge retrieval
-- Multi-model LLM support
 - Authentication & user management
+- Background jobs for long-running research requests
 
 ---
 
@@ -167,7 +174,7 @@ cd multi-agent-research-system
 ### Create Virtual Environment
 
 ```bash
-python -m venv venv
+python -m venv .venv
 ```
 
 ### Activate Environment
@@ -175,13 +182,13 @@ python -m venv venv
 Windows
 
 ```bash
-venv\Scripts\activate
+.venv\Scripts\activate
 ```
 
 Linux/macOS
 
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 ### Install Dependencies
@@ -195,15 +202,76 @@ pip install -r requirements.txt
 Create a `.env` file:
 
 ```env
-OPENAI_API_KEY=your_api_key
-TAVILY_API_KEY=your_api_key
+# Primary LLM — GitHub Models (OpenAI gpt-4o-mini via an OpenAI-compatible endpoint)
+GITHUB_TOKEN=your_github_token
+# GITHUB_MODEL=openai/gpt-4o-mini   # optional override
+
+# Fallback LLM — Groq free tier (used automatically when the primary is rate-limited)
+GROQ_API_KEY=your_groq_api_key
+# GROQ_MODEL=llama-3.3-70b-versatile   # optional override
+
+# Web search
+TAVILY_API_KEY=your_tavily_api_key
 ```
 
 ### Run Streamlit
 
 ```bash
-streamlit run streamlit_app.py
+streamlit run researchmind/app.py
 ```
+
+---
+
+## ⚡ Running the API
+
+Alongside the Streamlit UI, the project exposes a **FastAPI** backend that wraps
+the same multi-agent pipeline, so any client (a frontend, a script, another
+service) can drive it over plain HTTP.
+
+### Start the server
+
+```bash
+uvicorn researchmind.api:app --reload
+```
+
+The API runs at **http://localhost:8000**. Interactive Swagger docs — where you
+can try every endpoint from the browser — are at **http://localhost:8000/docs**.
+
+> ℹ️ A research run is slow (multiple LLM + search calls and a write/critique
+> retry loop), so `POST /research` blocks until the pipeline finishes
+> (roughly 30s–2min per request).
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/health` | Liveness check |
+| `POST` | `/research` | Run the full research pipeline for a topic |
+| `GET`  | `/history?limit=20` | List past reports, newest first |
+| `GET`  | `/reports/{id}` | Fetch a single stored report |
+| `GET`  | `/reports/{id}/pdf` | Download a report as a PDF |
+
+### Example request
+
+```bash
+curl -X POST http://localhost:8000/research \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "quantum computing breakthroughs in 2025"}'
+```
+
+Example response:
+
+```json
+{
+  "topic": "quantum computing breakthroughs in 2025",
+  "report": "# Research Report ...",
+  "feedback": "Score: 8/10 ...",
+  "score": 8,
+  "attempts": 1
+}
+```
+
+> The Streamlit UI and the API can run at the same time on different ports.
 
 ---
 
